@@ -20,6 +20,8 @@ const unsigned long pulseTimeout = 400;
 unsigned int totalAmount = 0;
 unsigned long chargeStartTime = 0;
 bool charging = false;
+bool pendingCharging = false;
+unsigned int pendingMinutes = 0;
 String serialBuffer = "";
 
 // Door states
@@ -70,6 +72,8 @@ void unlockDoor() {
 void stopCharging() {
   charging = false;
   digitalWrite(relayPin, HIGH);
+  pendingCharging = false;
+  pendingMinutes = 0;
   esp32Serial.println("CHARGING_STOPPED");
   unlockDoor();
   lcd.clear();
@@ -117,12 +121,19 @@ void processESP32Command(String cmd) {
     Serial.println(ip);
   } else if (cmd.startsWith("START:")) {
     int mins = cmd.substring(6).toInt();
-    startChargingFromApp(mins);
-    // After starting, wait for door to be ready to lock
-    doorState = DOOR_WAITING_TO_LOCK;
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Close door...");
+    pendingCharging = (mins > 0);
+    if (pendingCharging) {
+      pendingMinutes = mins;
+      charging = false;
+      digitalWrite(relayPin, HIGH);
+      doorState = DOOR_WAITING_TO_LOCK;
+      unlockDoor();
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Close door...");
+    } else {
+      esp32Serial.println("ERR:INVALID_TIME");
+    }
   } else if (cmd == "STOP") {
     stopCharging();
   } else if (cmd == "UNLOCK_DOOR") {
@@ -206,6 +217,11 @@ void loop() {
       lcd.setCursor(0, 0);
       lcd.print("Door locked!");
       delay(1000);
+      if (pendingCharging) {
+        startChargingFromApp(pendingMinutes);
+        pendingCharging = false;
+        pendingMinutes = 0;
+      }
     } else {
       // Keep waiting, show message
       static unsigned long lastBlink = 0;
